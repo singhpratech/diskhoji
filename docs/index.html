@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diskhoji — every byte, accounted for</title>
+<meta name="description" content="Fast, beautiful disk space analysis for Linux, macOS, and Windows. One standalone ~7 MB native Rust app. Cushion treemap + heatmap grid + radial rings, light & dark themes, parallel scanner, no Electron.">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:title" content="Diskhoji — every byte, accounted for">
+<meta property="og:description" content="Sail your digital seas. One standalone ~7 MB native Rust app charts every byte on your disk — cushion treemap + heatmap grid + radial rings, no Electron, no telemetry, nothing about you leaves your machine.">
+<meta property="og:image" content="https://diskhoji.org/hero.jpg">
+<meta property="og:url" content="https://diskhoji.org">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+:root{
+  --bg:#0E1116; --well:#0A0D12; --panel:#141922; --panel2:#1B2130;
+  --line:#222B38; --line2:#313B4C;
+  --ink:#E8ECF4; --ink2:#A6B0C3; --ink3:#7A879E;
+  --acc:#E5B96B; --lapis:#1E5A9E; --lapis2:#3987e5; --teal:#199e70; --coral:#e66767;
+  --mono:ui-monospace,'SF Mono','Cascadia Mono','JetBrains Mono',Menlo,Consolas,'Liberation Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--ink);font-family:var(--mono);
+  font-size:16px;line-height:1.7;font-variant-numeric:tabular-nums;
+}
+::selection{background:rgba(229,185,107,.25)}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--acc);outline-offset:3px;border-radius:3px}
+img{max-width:100%}
+.wrap{max-width:1100px;margin:0 auto;padding:0 24px}
+.eyebrow{font-size:13px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink3)}
+.eyebrow b{color:var(--acc);font-weight:400}
+.btn{
+  display:inline-block;border:1px solid var(--line2);color:var(--ink2);
+  font-size:13.5px;letter-spacing:.1em;text-transform:uppercase;padding:14px 24px;
+  border-radius:7px;transition:all .15s;font-family:var(--mono);cursor:pointer;background:transparent;
+}
+.btn:hover{background:var(--panel2);color:var(--ink);border-color:#3E4A5E;text-decoration:none}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#161006;font-weight:700}
+.btn.primary:hover{background:#EFCB85;border-color:#EFCB85}
+.btn.play{border-color:var(--acc);color:var(--acc)}
+.btn.play:hover{background:rgba(229,185,107,.12);color:var(--acc)}
+nav .links a.navplay{color:var(--acc);border:1px solid var(--acc);border-radius:6px;padding:6px 12px}
+nav .links a.navplay:hover{background:rgba(229,185,107,.12);color:var(--acc)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- nav ---------- */
+nav{
+  position:sticky;top:0;z-index:20;height:62px;display:flex;align-items:center;
+  border-bottom:1px solid var(--line);background:rgba(14,17,22,.9);backdrop-filter:blur(10px);
+}
+nav .wrap{width:100%;display:flex;align-items:center;gap:26px}
+.brand{display:flex;align-items:center;gap:11px;color:var(--ink)}
+.brand:hover{text-decoration:none}
+.brand img{width:26px;height:26px;border-radius:6px}
+.brand b{font-size:15px;letter-spacing:.08em}
+nav .links{margin-left:auto;display:flex;gap:24px;flex-wrap:wrap}
+nav .links a{color:var(--ink3);font-size:13px;letter-spacing:.1em;text-transform:uppercase}
+nav .links a:hover{color:var(--ink);text-decoration:none}
+
+/* ---------- hero ---------- */
+#hero{position:relative;border-bottom:1px solid var(--line);background:var(--well)}
+#hero picture img{
+  display:block;width:100%;height:min(78vh,680px);object-fit:cover;object-position:center 30%;
+}
+#hero .scrim{
+  position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(180deg,rgba(10,13,18,.25) 0%,rgba(10,13,18,0) 34%,rgba(10,13,18,.62) 74%,rgba(14,17,22,.97) 100%);
+}
+#hero .copy{position:absolute;left:0;right:0;bottom:0;padding-bottom:46px}
+h1{font-size:clamp(28px,min(5vw,6.5vh),54px);line-height:1.1;letter-spacing:-.01em;margin:14px 0 18px;max-width:20ch;text-shadow:0 2px 24px rgba(0,0,0,.8)}
+h1 em{font-style:normal;color:var(--acc)}
+#hero .sub{color:var(--ink2);font-size:17px;max-width:56ch;margin-bottom:28px;text-shadow:0 1px 12px rgba(0,0,0,.9)}
+.ctas{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:30px}
+.quick{display:flex;gap:34px;flex-wrap:wrap}
+.quick div b{display:block;font-size:22px;letter-spacing:-.01em}
+.quick div span{font-size:12px;color:var(--ink3);letter-spacing:.12em;text-transform:uppercase}
+
+/* ---------- wave divider ---------- */
+.wavediv{height:34px;overflow:hidden;background:var(--well);border-bottom:1px solid var(--line)}
+.wavediv svg{display:block;width:200%;height:34px;animation:drift 14s linear infinite}
+@keyframes drift{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+/* ---------- sections ---------- */
+section{padding:84px 0;border-bottom:1px solid var(--line);scroll-margin-top:70px}
+h2{font-size:clamp(22px,3vw,29px);letter-spacing:-.01em;margin:12px 0 16px}
+.lead{color:var(--ink2);max-width:66ch;margin-bottom:42px}
+
+/* ---------- manifest (numbers) ---------- */
+#manifest{padding:0;border-bottom:1px solid var(--line);background:var(--well)}
+.numbers{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;background:var(--line)}
+.numbers div{background:var(--bg);padding:30px 26px}
+.numbers b{display:block;font-size:31px;letter-spacing:-.01em}
+.numbers b small{font-size:15px;color:var(--ink2);font-weight:400;margin-left:4px}
+.numbers span{font-size:12px;color:var(--ink3);letter-spacing:.14em;text-transform:uppercase}
+
+/* ---------- readings ---------- */
+.readings{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.reading{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.reading.wide{grid-column:1 / -1}
+.reading canvas{display:block;width:100%;height:auto;background:var(--well)}
+.reading .cap{padding:20px 22px}
+.reading .cap b{display:block;font-size:16px;margin-bottom:6px}
+.reading .cap b i{font-style:normal;color:var(--acc);margin-right:9px}
+.reading .cap p{font-size:14px;color:var(--ink2)}
+
+/* ---------- instrument cards ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:24px 24px 22px}
+.card b{display:block;font-size:16px;margin-bottom:9px}
+.card b i{font-style:normal;color:var(--acc);margin-right:10px}
+.card p{font-size:14px;color:var(--ink2)}
+
+/* ---------- install ---------- */
+#install .dlrow{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:30px}
+#install .dlcount{color:var(--ink3);font-size:13.5px;letter-spacing:.06em}
+#install .dlcount b{color:var(--acc);font-weight:700}
+pre{
+  position:relative;background:var(--well);border:1px solid var(--line);border-radius:10px;
+  padding:24px 26px;overflow-x:auto;font-size:15px;line-height:2;margin:0 0 18px;
+}
+pre .c{color:var(--ink3)}
+pre .p{color:var(--acc)}
+.copybtn{
+  position:absolute;top:10px;right:10px;background:var(--panel2);border:1px solid var(--line2);
+  color:var(--ink3);font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;
+  padding:6px 12px;border-radius:6px;cursor:pointer;text-transform:uppercase;
+}
+.copybtn:hover{color:var(--acc);border-color:var(--acc)}
+.note{font-size:14px;color:var(--ink3)}
+
+/* ---------- platform cards ---------- */
+.plats{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.plat{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:22px;display:flex;flex-direction:column;gap:14px;align-items:flex-start;
+}
+.plat.mine{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
+.plat .ph{display:flex;align-items:baseline;gap:10px;min-height:24px;white-space:nowrap}
+.plat .ph b{font-size:17px}
+.plat .ph span{font-size:12px;color:var(--ink3);letter-spacing:.1em;text-transform:uppercase}
+.plat .ph .dlnum{margin-left:auto;color:var(--acc);letter-spacing:.04em;text-transform:none;white-space:nowrap}
+.plat .cmd{
+  display:flex;align-items:center;gap:8px;width:100%;height:44px;
+  background:var(--well);border:1px solid var(--line);border-radius:8px;padding:9px 12px;
+}
+.plat .cmd code{flex:1;font-size:12.5px;color:var(--ink2);overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+.plat .cmd code::-webkit-scrollbar{display:none}
+.cmdcopy{
+  flex:none;background:var(--panel2);border:1px solid var(--line2);color:var(--ink3);
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;padding:5px 10px;
+  border-radius:5px;cursor:pointer;text-transform:uppercase;
+}
+.cmdcopy:hover{color:var(--acc);border-color:var(--acc)}
+.plat .pnote{font-size:12.5px;color:var(--ink3)}
+.plat .btn{width:100%;text-align:center;height:48px;display:flex;align-items:center;justify-content:center}
+
+/* ---------- varuna ---------- */
+#varuna .cols{display:grid;grid-template-columns:300px 1fr;gap:52px;align-items:start}
+#varuna .sigil img{width:100%;max-width:300px;border-radius:22px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+#varuna .big{font-size:22px;margin:12px 0 18px;letter-spacing:-.01em}
+#varuna p{color:var(--ink2);max-width:60ch;margin-bottom:16px;font-size:15px}
+.lore{list-style:none;margin:26px 0 0}
+.lore li{
+  display:grid;grid-template-columns:34px 1fr;gap:14px;align-items:baseline;
+  padding:14px 0;border-top:1px solid var(--line);font-size:14px;color:var(--ink2);
+}
+.lore li:last-child{border-bottom:1px solid var(--line)}
+.lore i{font-style:normal;color:var(--acc);font-size:17px;text-align:center}
+.lore b{color:var(--ink)}
+
+/* ---------- voyage (game) ---------- */
+#voyage{background:var(--well)}
+#gamebox{
+  position:relative;background:#0A0F1A;border:1px solid var(--line2);border-radius:12px;
+  overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.5);
+}
+#game{display:block;width:100%;height:auto}
+#gamehud{
+  display:flex;align-items:center;gap:22px;padding:13px 18px;
+  border-top:1px solid var(--line);background:var(--panel);flex-wrap:wrap;
+}
+#gamehud .k{font-size:12.5px;color:var(--ink3);letter-spacing:.1em;text-transform:uppercase}
+#gamehud .v{font-size:15px;color:var(--ink)}
+#gamehud .spacer{flex:1}
+#overlay{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:16px;background:rgba(8,11,17,.72);backdrop-filter:blur(2px);text-align:center;padding:20px;
+}
+#overlay.hide{display:none}
+#overlay .ot{font-size:clamp(18px,3vw,26px);letter-spacing:.14em;text-transform:uppercase}
+#overlay .os{font-size:13.5px;color:var(--ink2);max-width:46ch}
+#overlay .ob{font-size:13px;color:var(--ink3)}
+
+/* ---------- footer ---------- */
+footer{padding:46px 0 64px}
+footer .wrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+footer .kho{color:var(--ink3);font-size:14px}
+footer .links{margin-left:auto;display:flex;gap:22px}
+footer a{color:var(--ink3);font-size:13.5px}
+footer a:hover{color:var(--ink)}
+
+@media (max-width:920px){
+  .readings{grid-template-columns:1fr}
+  #varuna .cols{grid-template-columns:1fr}
+  #varuna .sigil{text-align:center}
+  #hero picture img{height:min(64vh,520px)}
+  #hero .copy{position:relative;padding:30px 0 40px;background:var(--well)}
+  #hero .scrim{background:linear-gradient(180deg,rgba(10,13,18,.1),rgba(14,17,22,.8) 92%)}
+  h1{text-shadow:none}
+}
+
+/* short viewports: copy flows below the cover so the art is always visible */
+@media (max-height:900px){
+  #hero picture img{height:46vh;min-height:300px}
+  #hero .scrim{display:none}
+  #hero .copy{position:static;padding:28px 0 42px;background:var(--well)}
+  h1{text-shadow:none}
+  #hero .sub{text-shadow:none}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="favicon-64.png" alt="" width="26" height="26"><b>Diskhoji</b></a>
+    <div class="links">
+      <a href="#install">Download</a>
+      <a class="navplay" href="#voyage">⛵ Play</a>
+      <a href="#readings">Charts</a>
+      <a href="#different">Why</a>
+      <a href="#varuna">About</a>
+      <a href="https://github.com/singhpratech/diskhoji">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header id="hero">
+  <picture>
+    <source srcset="hero.webp" type="image/webp">
+    <img src="hero.jpg" alt="A lone dhow with a Makara prow sails a sea of glowing treemap tiles at dusk, beneath Varuna's golden pasha ring rising like a moon among watchful stars." fetchpriority="high">
+  </picture>
+  <div class="scrim"></div>
+  <div class="copy">
+    <div class="wrap">
+      <div class="eyebrow"><b>◆</b> Chart your digital seas · Linux · macOS · Windows</div>
+      <h1>Every byte, <em>accounted for.</em></h1>
+      <p class="sub">Your disk is an ocean — Diskhoji is the seeker that sounds it. One standalone native Rust app — a single ~7&nbsp;MB binary — charts millions of files a second into a cushion treemap, a heatmap of a thousand watching cells, and radial rings that ripple out from the deep. No Electron, no telemetry, no account — nothing about you leaves your ship.</p>
+      <div class="ctas">
+        <a class="btn primary" id="dl-primary" href="https://github.com/singhpratech/diskhoji/releases/download/v0.2.8/diskhoji-v0.2.8-linux-x86_64.tar.gz">⚓ Download</a>
+        <a class="btn play" href="#voyage">⛵ Play the voyage</a>
+        <a class="btn" href="https://github.com/singhpratech/diskhoji">View source</a>
+      </div>
+      <div class="quick">
+        <div><b>~7 MB</b><span>one native binary</span></div>
+        <div><b>1.85M</b><span>files in 2.7 s</span></div>
+        <div><b>15 ms</b><span>treemap layout</span></div>
+        <div><b id="dl-hero">—</b><span>downloads</span></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wavediv" aria-hidden="true">
+  <svg viewBox="0 0 2400 34" preserveAspectRatio="none">
+    <path d="M0 20 Q75 8 150 20 T300 20 T450 20 T600 20 T750 20 T900 20 T1050 20 T1200 20 T1350 20 T1500 20 T1650 20 T1800 20 T1950 20 T2100 20 T2250 20 T2400 20" fill="none" stroke="#1E5A9E" stroke-width="2" opacity=".55"/>
+    <path d="M0 27 Q75 17 150 27 T300 27 T450 27 T600 27 T750 27 T900 27 T1050 27 T1200 27 T1350 27 T1500 27 T1650 27 T1800 27 T1950 27 T2100 27 T2250 27 T2400 27" fill="none" stroke="#E5B96B" stroke-width="1.5" opacity=".35"/>
+  </svg>
+</div>
+
+<section id="manifest" aria-label="Ship's manifest">
+  <div class="numbers">
+    <div><b>6.2<small>MB</small></b><span>hull weight — everything aboard</span></div>
+    <div><b>685k<small>files/s</small></b><span>cold-scan headway</span></div>
+    <div><b>15<small>ms</small></b><span>to chart a 2M-node deep</span></div>
+    <div><b>0</b><span>trackers, ads, or telemetry</span></div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="eyebrow">Come aboard</div>
+    <h2>Aboard in one command.</h2>
+    <p class="lead" style="margin-bottom:26px"><span class="dlcount"><b id="dl-install">—</b> downloads total · counted by GitHub</span></p>
+    <div class="plats">
+      <div class="plat" id="plat-linux">
+        <div class="ph"><b>Linux</b><span>x86_64</span><span class="dlnum" id="n-linux">—</span></div>
+        <a class="btn primary" id="dl-linux" href="https://github.com/singhpratech/diskhoji/releases/download/v0.2.8/diskhoji-v0.2.8-linux-x86_64.tar.gz">⚓ Download</a>
+        <div class="cmd"><code>curl -fsSL https://diskhoji.org/install.sh | sh</code><button class="cmdcopy" aria-label="Copy command">copy</button></div>
+        <p class="pnote">AppImage — mark it executable (your file manager's "allow executing", or <code>chmod +x</code>) and double-click. The one-line installer above moors <code>diskhoji</code> in <code>~/.local/bin</code> <em>and</em> adds it to your applications menu.</p>
+      </div>
+      <div class="plat" id="plat-macos">
+        <div class="ph"><b>macOS</b><span>Apple Silicon</span><span class="dlnum" id="n-macos">—</span></div>
+        <a class="btn primary" id="dl-mac" href="https://github.com/singhpratech/diskhoji/releases/download/v0.2.8/Diskhoji-v0.2.8-macos-arm64.dmg">⚓ Download .dmg</a>
+        <div class="cmd"><code>curl -fsSL https://diskhoji.org/install.sh | sh</code><button class="cmdcopy" aria-label="Copy command">copy</button></div>
+        <p class="pnote">Apple Silicon. Open the .dmg, drag Diskhoji into Applications. First launch is blocked (ad-hoc signed, not yet notarized): open it once, then allow it in System Settings → Privacy &amp; Security → <b>Open Anyway</b> (or run <code>xattr -dr com.apple.quarantine /Applications/Diskhoji.app</code>).</p>
+      </div>
+      <div class="plat" id="plat-windows">
+        <div class="ph"><b>Windows</b><span>x86_64</span><span class="dlnum" id="n-windows">—</span></div>
+        <a class="btn primary" id="dl-win" href="https://github.com/singhpratech/diskhoji/releases/download/v0.2.8/diskhoji-v0.2.8-windows-x86_64.msi">⚓ Download installer</a>
+        <div class="cmd"><code>irm https://diskhoji.org/install.ps1 | iex</code><button class="cmdcopy" aria-label="Copy command">copy</button></div>
+        <p class="pnote">Run the <code>.msi</code> — installs Diskhoji, adds Start Menu &amp; Desktop shortcuts, and puts it on PATH. Not code-signed yet, so SmartScreen may say "unknown publisher" — click <b>More info → Run anyway</b>. Prefer no installer? Grab the <a href="https://github.com/singhpratech/diskhoji/releases/download/v0.2.8/diskhoji-v0.2.8-windows-x86_64.zip">portable zip</a> and double-click <code>diskhoji.exe</code>.</p>
+      </div>
+    </div>
+    <pre style="margin-top:26px"><span class="c"># or build from source — Linux, macOS &amp; Windows, needs rustup.rs</span>
+<span class="p">$</span> git clone https://github.com/singhpratech/diskhoji &amp;&amp; cd diskhoji
+<span class="p">$</span> cargo build --release &amp;&amp; ./target/release/diskhoji ~/</pre>
+    <p class="note">A native window by default — <code>--web</code> serves the same dashboard on localhost if you prefer the browser.</p>
+  </div>
+</section>
+<section id="voyage">
+  <div class="wrap">
+    <div class="eyebrow">Doldrums while the scan sails?</div>
+    <h2>Take the helm — The Seeker's Voyage.</h2>
+    <p class="lead">A little offline diversion, right here on deck: leap the corrupt reefs, gather the amber bytes, see how many fathoms you can log. <b>Space</b>, <b>↑</b>, or tap to jump — release early for a short hop, <b>↓</b> to dive. Works with the rigging cut — no connection needed. And it sails with you: the same game ships <b>inside the app</b> — click <b>Play game</b> in Diskhoji itself.</p>
+    <div id="gamebox">
+      <canvas id="game" width="1040" height="320" role="img" aria-label="The Seeker's Voyage: a side-scrolling mini-game where a small boat jumps over reef blocks on a tiled sea."></canvas>
+      <div id="overlay">
+        <div class="ot">The Seeker's Voyage</div>
+        <div class="os">Sail east under the pasha moon. Leap the corrupt reefs, gather amber bytes.</div>
+        <button class="btn primary" id="sail">⛵ Set sail</button>
+        <div class="ob">Space / ↑ / tap to jump — release early for a short hop, ↓ to dive</div>
+      </div>
+    </div>
+    <div id="gamehud">
+      <span class="k">Fathoms</span><span class="v" id="g-dist">0</span>
+      <span class="k">Bytes</span><span class="v" id="g-bytes">0</span>
+      <span class="spacer"></span>
+      <span class="k">Best</span><span class="v" id="g-best">0</span>
+    </div>
+    <div class="grid" style="margin-top:26px">
+      <div class="card"><b><i>⛵</i>The helm</b><p><strong>Space</strong>, <strong>↑</strong>, or tap — leap. Hold for the full arc; let go early and the boat takes a <strong>short hop</strong>, exactly like the Chrome dino. <strong>↓</strong> in mid-air <strong>dives</strong> back to the water at triple speed.</p></div>
+      <div class="card"><b><i>〜</i>The sea</b><p>The current starts gentle and builds steadily for about two minutes to full tide — no sudden cliffs. Reef gaps stretch as the water speeds up, and every reef is proven clearable by frame-exact simulation before it ships.</p></div>
+      <div class="card"><b><i>◆</i>The ledger</b><p><strong>Fathoms</strong> log your distance; each <strong>amber byte</strong> is worth 8. Tall reefs demand a full-arc leap — short hops clear only the small ones. Your best voyage is kept in the ship's log, on this device only.</p></div>
+      <div class="card"><b><i>▦</i>Aboard the app</b><p>The very same voyage ships <strong>inside Diskhoji</strong> — click <strong>Play game</strong> on the landing deck or in the dashboard toolbar. It sails in <code>--web</code> mode too. No connection needed, anywhere.</p></div>
+    </div>
+  </div>
+</section>
+<section id="readings">
+  <div class="wrap">
+    <div class="eyebrow">Three charts of the same waters</div>
+    <h2>Area when you hunt the bulk. Color when you hunt the crowd. Rings when you hunt the depths.</h2>
+    <p class="lead">A treemap makes the giant files impossible to miss — but a thousand small files vanish into slivers. So Diskhoji carries two more charts: a heatmap where every item holds an equal cell and color carries the size, like watch-lights on dark water — and radial rings that fan the current folder into a sunburst, five rings deep. All three are drawn live below, straight from the same chart engine the app runs. One click changes charts; zoom, select, and right-click hold their course in all three.</p>
+    <div class="readings">
+      <div class="reading">
+        <canvas id="tmap" width="860" height="430" aria-label="Cushion treemap example"></canvas>
+        <div class="cap"><b><i>▦</i>Treemap — the chart of area</b><p>Cushion-shaded, area = size. Double-click to dive into any folder, breadcrumbs to surface again.</p></div>
+      </div>
+      <div class="reading">
+        <canvas id="hmap" width="860" height="430" aria-label="Heatmap grid example"></canvas>
+        <div class="cap"><b><i>▤</i>Heatmap — the thousand-eyed watch</b><p>One cell per item, ring = folder, color = size on a log scale. The small-but-many stay in sight.</p></div>
+      </div>
+      <div class="reading wide">
+        <canvas id="rmap" width="860" height="430" aria-label="Radial rings sunburst example"></canvas>
+        <div class="cap"><b><i>◎</i>Radial rings — the sounding of the deep</b><p>The current folder fanned into a sunburst, up to five rings out from the hub. Each wedge's sweep is its share of the space; dive by clicking a wedge, surface by clicking the centre.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="different">
+  <div class="wrap">
+    <div class="eyebrow">What stands Diskhoji apart</div>
+    <h2>Built like a ship's instrument, not a cruise liner.</h2>
+    <div class="grid">
+      <div class="card"><b><i>◱</i>One standalone binary</b><p>Scanner, chart engines, and a true native window compile into a single ~7 MB executable. No install required, no webview, no 200 MB of Electron, no runtime to fetch. Stow it anywhere and run it.</p></div>
+      <div class="card"><b><i>⚡</i>All hands on deck</b><p>A work-stealing scanner crews every core: 1.85 million files catalogued in 2.7 seconds cold, 0.4 warm. Rescans cost nothing, so you actually make them.</p></div>
+      <div class="card"><b><i>▦</i>Native-speed charting</b><p>The squarified treemap is computed in Rust — about 15 ms for a two-million-node tree. The window only paints pre-computed rectangles; million-file folders never becalm the UI.</p></div>
+      <div class="card"><b><i>⌗</i>A bridge, fully cross-linked</b><p>Explorer tree ⟷ chart ⟷ file types ⟷ largest files. Spotlight a file type across the map; click a leviathan and its tile lights up on the chart.</p></div>
+      <div class="card"><b><i>✕</i>Jettison without rescanning</b><p>Right-click → delete permanently, behind a confirmation you can trust. The in-memory model updates in place — every total and chart stays true at once.</p></div>
+      <div class="card"><b><i>⏻</i>Private as deep water</b><p>No telemetry, no trackers, no account. By default Diskhoji never reaches the network — the one exception is opt-in: turn on update checks (off by default) or click <em>Check for updates</em>, and it asks GitHub for the latest version number only, sending nothing about you or your files. <code>--web</code> binds to 127.0.0.1 and nowhere else; scanning keeps to one filesystem, never follows symlinks, refuses to scuttle the scan root.</p></div>
+    </div>
+  </div>
+</section>
+<section id="varuna">
+  <div class="wrap">
+    <div class="eyebrow">The seeker's patron</div>
+    <h2>Under Varuna's watch.</h2>
+    <div class="cols">
+      <div class="sigil"><img src="icon.png" alt="The Diskhoji sigil: Varuna's golden pasha rope binding a lapis treemap, watched by small four-pointed stars."></div>
+      <div>
+        <p class="big">Before the sea had charts, it had a keeper.</p>
+        <p>In the oldest Vedic hymns, Varuna is lord of the waters, robed in the splendor of lapis lazuli, and keeper of <b>ṛta</b> — the cosmic order. Nothing moves on his ocean unrecorded: the scriptures say he knows every blink of every eye, and the stars are his thousand spies keeping watch through the night.</p>
+        <p>Diskhoji — <i>khoji</i>, खोजी, the seeker — sails in that tradition, across seas of data instead of water.</p>
+        <ul class="lore">
+          <li><i>◯</i><span><b>The pasha.</b> Varuna's rope binds all things to account. Ours binds every byte it can read on the one filesystem it charts; what your user cannot open, it tallies apart as unreadable rather than feign to hold.</span></li>
+          <li><i>✦</i><span><b>The thousand eyes.</b> His star-spies keep the watch — the heatmap gives up to two thousand files an equal cell each, so the small-but-many stay in sight instead of vanishing into slivers; when a folder brims past that, the largest keep their light and the rest are counted but unlit.</span></li>
+          <li><i>ᨏ</i><span><b>The Makara.</b> The tide-beast he rides carves our prow: fast, at home in deep water, stranger to no sea.</span></li>
+          <li><i>◐</i><span><b>Guardian of the West.</b> He keeps the dusk horizon — the quiet hour when you finally clean your disk.</span></li>
+        </ul>
+        <p style="margin-top:26px"><b>Inspired by the classics. Copied from none.</b> The great treemap analyzers of the 2000s taught everyone what a disk looks like — then stayed in harbor: one OS, one thread, one view. Diskhoji is a ground-up rebuild of the idea in Rust — multi-core, three charts, one small native binary, and at home on Linux, macOS, and Windows.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+
+
+
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="favicon-64.png" alt="" width="26" height="26"><b>Diskhoji</b></a>
+    <span class="kho">khoji (खोजी) — seeker · MIT license · created by <a href="https://theaivibe.org/about" rel="author">Prateek Singh</a> · fair winds</span>
+    <div class="links">
+      <a href="https://github.com/singhpratech/diskhoji">GitHub</a>
+      <a href="https://github.com/singhpratech/diskhoji/issues">Issues</a>
+      <a href="https://github.com/singhpratech/diskhoji/releases">Releases</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+'use strict';
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- deterministic PRNG so the demo charts are stable ---------- */
+function lcg(seed){ let s = seed>>>0; return () => (s = (1664525*s + 1013904223)>>>0) / 4294967296; }
+const PAL = ['#3987e5','#1E5A9E','#199e70','#2b6fc4','#E5B96B','#155e8a','#26a641','#e66767'];
+const HEATC = ['#1D2531','#0E4429','#006D32','#26A641','#39D353'];
+
+/* ---------- squarified treemap demo ---------- */
+function squarify(sizes, x0, y0, w0, h0){
+  const out = []; const total = sizes.reduce((a,b)=>a+b,0);
+  const scale = (w0*h0)/total;
+  let x=x0, y=y0, w=w0, h=h0, i=0;
+  while (i < sizes.length){
+    const vert = w < h, l = vert ? w : h;
+    let sum=0, amin=Infinity, amax=0, worstPrev=Infinity, j=i;
+    while (j < sizes.length){
+      const a = sizes[j]*scale, ns = sum+a;
+      const nmin = Math.min(amin,a), nmax = Math.max(amax,a);
+      const worst = Math.max((l*l*nmax)/(ns*ns), (ns*ns)/(l*l*nmin));
+      if (worst <= worstPrev){ sum=ns; amin=nmin; amax=nmax; worstPrev=worst; j++; } else break;
+    }
+    const t = sum/l; let off = 0;
+    for (let k=i;k<j;k++){
+      const len = sizes[k]*scale/t;
+      out.push(vert ? [x+off,y,len,t] : [x,y+off,t,len]);
+      off += len;
+    }
+    if (vert){ y+=t; h-=t; } else { x+=t; w-=t; }
+    i=j;
+  }
+  return out;
+}
+function genSizes(rand, n, spread){
+  const s = Array.from({length:n}, () => Math.pow(rand(), spread)*100 + 0.4);
+  s.sort((a,b)=>b-a); return s;
+}
+function cushion(ctx, x, y, w, h, color){
+  ctx.fillStyle = color; ctx.fillRect(x,y,w,h);
+  if (w>4 && h>4){
+    const g = ctx.createLinearGradient(x,y,x+w,y+h);
+    g.addColorStop(0,'rgba(255,255,255,0.22)');
+    g.addColorStop(0.45,'rgba(255,255,255,0)');
+    g.addColorStop(1,'rgba(0,0,0,0.32)');
+    ctx.fillStyle = g; ctx.fillRect(x,y,w,h);
+    ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(x,y+h); ctx.lineTo(x,y); ctx.lineTo(x+w,y); ctx.stroke();
+    ctx.strokeStyle='rgba(0,0,0,0.38)';
+    ctx.beginPath(); ctx.moveTo(x+w,y); ctx.lineTo(x+w,y+h); ctx.lineTo(x,y+h); ctx.stroke();
+  }
+}
+(function(){
+  const t = document.getElementById('tmap'), tc = t.getContext('2d');
+  tc.fillStyle = '#0A0D12'; tc.fillRect(0,0,t.width,t.height);
+  const rand = lcg(369);
+  const top = squarify(genSizes(rand, 7, 2.2), 0, 0, t.width, t.height);
+  for (const [gx,gy,gw,gh] of top){
+    const inner = squarify(genSizes(rand, 22, 1.8), gx+1, gy+1, Math.max(gw-2,1), Math.max(gh-2,1));
+    const c = PAL[Math.floor(rand()*6)]; // group hue: ocean blues/teals mostly
+    for (const [x,y,w,h] of inner){
+      const col = rand() < 0.8 ? c : PAL[Math.floor(rand()*PAL.length)];
+      cushion(tc, x+0.5, y+0.5, Math.max(w-1,0.5), Math.max(h-1,0.5), col);
+    }
+  }
+  const hcv = document.getElementById('hmap'), hc = hcv.getContext('2d');
+  hc.fillStyle = '#0A0D12'; hc.fillRect(0,0,hcv.width,hcv.height);
+  const r2 = lcg(369);
+  const PADX = 26, PADY = 26, pitch = 33, cell = 26;
+  const cols = Math.floor((hcv.width - PADX*2) / pitch);
+  const rows = Math.floor((hcv.height - PADY*2) / pitch);
+  const items = Array.from({length: cols*rows}, () => Math.pow(r2(), 2.4));
+  items.sort((a,b)=>b-a);
+  items.forEach((v, ix) => {
+    const lvl = Math.min(4, Math.floor(Math.pow(v, 0.45) * 4.999));
+    const x = PADX + (ix % cols)*pitch, y = PADY + Math.floor(ix/cols)*pitch;
+    hc.fillStyle = HEATC[lvl];
+    hc.beginPath(); hc.roundRect(x, y, cell, cell, 5); hc.fill();
+    if (r2() < 0.16){ hc.strokeStyle='rgba(232,236,244,0.45)'; hc.lineWidth=1.2; hc.stroke(); }
+  });
+
+  /* ---------- radial rings (sunburst) ---------- */
+  const rcv = document.getElementById('rmap'), rcx = rcv.getContext('2d');
+  rcx.fillStyle = '#0A0D12'; rcx.fillRect(0,0,rcv.width,rcv.height);
+  const r3 = lcg(369);
+  const CX = 300, CY = rcv.height/2, R0 = 30, RMAX = 182, DEPTH = 5;
+  const band = (RMAX - R0) / DEPTH, GAPA = 0.012;
+  const hexToRgb = h => [1,3,5].map(i => parseInt(h.slice(i,i+2),16));
+  const mix = (h,t) => { const [r,g,b]=hexToRgb(h), m=v=>Math.round(v+(255-v)*t); return `rgb(${m(r)},${m(g)},${m(b)})`; };
+  function wedge(a0,a1,ri,ro,fill){
+    const g = GAPA/2;
+    if (a1-a0 <= GAPA*1.2){ const c=(a0+a1)/2; a0=c-0.0005; a1=c+0.0005; } else { a0+=g; a1-=g; }
+    rcx.beginPath(); rcx.arc(CX,CY,ro,a0,a1); rcx.arc(CX,CY,ri,a1,a0,true); rcx.closePath();
+    rcx.fillStyle = fill; rcx.fill();
+  }
+  function branch(a0,a1,depth,hue){
+    if (depth > DEPTH) return;
+    const ri = R0 + (depth-1)*band + 1, ro = R0 + depth*band - 1;
+    wedge(a0,a1,ri,ro, mix(hue, 0.06 + (depth-1)*0.13));   // lighter toward the rim
+    if (depth === DEPTH) return;
+    const span = a1-a0;
+    const n = Math.max(1, Math.round((3 - depth*0.4) + r3()*3));
+    const sizes = Array.from({length:n}, () => 0.25 + Math.pow(r3(),1.7));
+    const tot = sizes.reduce((s,v)=>s+v,0);
+    let a = a0;
+    for (let i=0;i<n;i++){
+      const aw = span * sizes[i]/tot;
+      if (depth < 2 || r3() > 0.16) branch(a, a+aw, depth+1, hue);   // some wedges end early — empty deep water
+      a += aw;
+    }
+  }
+  const G = 7, gs = Array.from({length:G}, () => 0.4 + Math.pow(r3(),1.5));
+  const gtot = gs.reduce((s,v)=>s+v,0);
+  let ang = -Math.PI/2;
+  for (let i=0;i<G;i++){ const aw = Math.PI*2 * gs[i]/gtot; branch(ang, ang+aw, 1, PAL[i % PAL.length]); ang += aw; }
+  // faint ring guides
+  rcx.strokeStyle = 'rgba(232,236,244,0.05)'; rcx.lineWidth = 1;
+  for (let d=1; d<=DEPTH; d++){ rcx.beginPath(); rcx.arc(CX,CY, R0 + d*band, 0, Math.PI*2); rcx.stroke(); }
+  // hub
+  rcx.beginPath(); rcx.arc(CX,CY,R0-3,0,Math.PI*2); rcx.fillStyle='#11151c'; rcx.fill();
+  rcx.strokeStyle='rgba(232,236,244,0.22)'; rcx.lineWidth=1.4; rcx.stroke();
+  rcx.fillStyle='#8b98a8'; rcx.font='600 13px ui-monospace,monospace'; rcx.textAlign='center'; rcx.textBaseline='middle';
+  rcx.fillText('root', CX, CY);
+  // legend
+  const LX = 560, LY = CY - 44;
+  rcx.textAlign='left';
+  const legend = [['#11151c','Hub - the folder in view'], [mix(PAL[0],0.19),'Rings 1-5 - folder depth'], [mix(PAL[4],0.32),'Wedge sweep = its size']];
+  rcx.font='14px ui-monospace,monospace';
+  legend.forEach(([c,txt],i) => {
+    const y = LY + i*30;
+    rcx.fillStyle=c; rcx.beginPath(); rcx.roundRect(LX, y-8, 16, 16, 4); rcx.fill();
+    rcx.strokeStyle='rgba(232,236,244,0.18)'; rcx.lineWidth=1; rcx.stroke();
+    rcx.fillStyle='#c4ccd6'; rcx.fillText(txt, LX+26, y);
+  });
+})();
+
+/* ---------- live download counter (GitHub Releases) ---------- */
+(async function(){
+  try{
+    const r = await fetch('https://api.github.com/repos/singhpratech/diskhoji/releases', {headers:{'Accept':'application/vnd.github+json'}});
+    if (!r.ok) return;
+    const rels = await r.json();
+    const assets = rels.flatMap(rel => rel.assets || []);
+    const per = {linux:0, macos:0, windows:0};
+    let total = 0;
+    for (const a of assets){
+      const c = a.download_count || 0;
+      total += c;
+      const n = a.name.toLowerCase();
+      if (n.includes('linux')) per.linux += c;
+      else if (n.includes('macos') || n.includes('darwin')) per.macos += c;
+      else if (n.includes('windows')) per.windows += c;
+    }
+    const fmt = v => v.toLocaleString('en-US');
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('dl-hero', fmt(total)); set('dl-install', fmt(total));
+    const dlword = v => fmt(v) + (v === 1 ? ' download' : ' downloads');
+    set('n-linux', dlword(per.linux));
+    set('n-macos', dlword(per.macos));
+    set('n-windows', dlword(per.windows));
+  }catch(e){ /* offline: dashes stay */ }
+})();
+
+/* ---------- copy buttons on code blocks ---------- */
+document.querySelectorAll('.cmdcopy').forEach(b => {
+  b.addEventListener('click', async () => {
+    try{
+      await navigator.clipboard.writeText(b.previousElementSibling.textContent);
+      b.textContent = '✓';
+    }catch(e){ b.textContent = 'ctrl-c'; }
+    setTimeout(() => b.textContent = 'copy', 1600);
+  });
+});
+document.querySelectorAll('pre').forEach(pre => {
+  const b = document.createElement('button');
+  b.className = 'copybtn';
+  b.textContent = 'copy';
+  b.addEventListener('click', async () => {
+    try{
+      await navigator.clipboard.writeText(pre.innerText.replace(/^[$>] /gm, ''));
+      b.textContent = 'copied ✓';
+    }catch(e){ b.textContent = 'select + ctrl-c'; }
+    setTimeout(() => b.textContent = 'copy', 1800);
+  });
+  pre.appendChild(b);
+});
+
+/* ---------- OS-aware download ---------- */
+(async function(){
+  const ua = navigator.userAgent;
+  const os = /Windows/i.test(ua) ? 'windows' : /Mac/i.test(ua) ? 'macos' : /Linux/i.test(ua) ? 'linux' : null;
+  const names = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
+  const p = document.getElementById('dl-primary');
+  if (os && p) p.textContent = '⚓ Download for ' + names[os];
+  if (os) document.getElementById('plat-' + os)?.classList.add('mine');
+  try{
+    const rels = await fetch('https://api.github.com/repos/singhpratech/diskhoji/releases').then(r => r.json());
+    const assets = (rels[0] && rels[0].assets) || [];
+    const pick = (...subs) => { for (const s of subs){ const a = assets.find(a => a.name.includes(s)); if (a) return a.browser_download_url; } return null; };
+    const best = {
+      linux:   pick('.AppImage', 'linux-x86_64.tar.gz'),
+      macos:   pick('macos-arm64.dmg', 'macos-arm64.app.zip', 'macos-arm64'),
+      windows: pick('windows-x86_64.msi', 'windows-x86_64.zip'),
+    };
+    const set = (id, url) => { const el = document.getElementById(id); if (el && url) el.href = url; };
+    set('dl-linux', best.linux); set('dl-mac', best.macos); set('dl-win', best.windows);
+    if (os && p && best[os]) p.href = best[os];
+  }catch(e){ /* buttons keep the releases-page fallback */ }
+})();
+
+/* ---------- play buttons center the game ---------- */
+document.querySelectorAll('a[href^="#"]').forEach(a => a.addEventListener('click', e => {
+  const id = a.getAttribute('href').slice(1);
+  const target = id === 'voyage' ? document.getElementById('gamebox') : document.getElementById(id);
+  if (!target) return;
+  e.preventDefault();
+  target.scrollIntoView({behavior:'smooth', block: id === 'voyage' ? 'center' : 'start'});
+  history.replaceState(null, '', '#' + id);
+}));
+
+/* ---------- The Seeker's Voyage ---------- */
+(function(){
+  const cv = document.getElementById('game');
+  const box = document.getElementById('gamebox');
+  const overlay = document.getElementById('overlay');
+  const ctx = cv.getContext('2d');
+  const W = 1040, H = 320;             // logical size
+  const SEA = H - 74;                  // sea line
+  const BOATX = 150;
+  const $id = s => document.getElementById(s);
+
+  // crisp on retina
+  function fit(){
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  fit(); window.addEventListener('resize', fit);
+
+  // background furniture (deterministic)
+  const rnd = lcg(108);
+  const stars = Array.from({length:42}, () => ({
+    x: rnd()*W, y: rnd()*(SEA-110), r: 0.7 + rnd()*1.4, p: rnd()*Math.PI*2, s: 0.4 + rnd()*1.2
+  }));
+  const tiles = Array.from({length:90}, () => ({
+    x: rnd()*W, d: 6 + rnd()*46, w: 10 + rnd()*20, c: rnd()
+  }));
+
+  // Chrome-dino MECHANICS (constant acceleration, speed-scaled jumps, variable
+  // jump height — release early for a short hop, ↓ to dive, speed-stretched
+  // gaps) at this game's own gentle pacing.
+  const BASE_SPEED = 3.2, MAX_SPEED = 8.5;
+  const ACCEL = 0.00076, GRAV = 0.62;   // ~2 min to reach MAX, dino-style ramp
+  const JUMPV = 12, DROPV = 6, MINJUMP = 42;
+  let running=false, over=false, t=0, dist=0, bytes=0, speed=BASE_SPEED;
+  let vy=0, boatY=SEA, jumping=false, lastTs=0, reachedMin=false, speedDrop=false;
+  let reefs=[], orbs=[], nextReef=560, nextOrb=880;
+  const fath = () => Math.floor(dist/10);
+  let best = +(localStorage.getItem('dk-voyage-best') || 0);
+  $id('g-best').textContent = best;
+
+  function reset(){
+    over=false; t=0; dist=0; bytes=0; speed=BASE_SPEED;
+    vy=0; boatY=SEA; jumping=false; lastTs=0; reachedMin=false; speedDrop=false;
+    reefs=[]; orbs=[]; nextReef=560; nextOrb=880;
+    $id('g-dist').textContent='0'; $id('g-bytes').textContent='0';
+  }
+  function start(){
+    if (running && !over) return;
+    reset(); running=true; overlay.classList.add('hide');
+    requestAnimationFrame(loop);
+  }
+  function jump(){
+    if (!running || over) return;
+    if (!jumping){ jumping=true; vy=-(JUMPV + speed/12); reachedMin=false; speedDrop=false; }
+  }
+  // dino endJump: releasing the key early shortens the hop
+  function endJump(){ if (jumping && reachedMin && vy < -DROPV) vy = -DROPV; }
+  // dino setSpeedDrop: ↓ kills upward motion and falls at 3×
+  function dive(){ if (jumping){ speedDrop=true; vy = 1; } }
+  function wreck(){
+    over=true; running=false;
+    const f = fath();
+    if (f > best){ best=f; localStorage.setItem('dk-voyage-best', best); $id('g-best').textContent=best; }
+    overlay.querySelector('.ot').textContent = 'Wrecked at '+f+' fathoms';
+    overlay.querySelector('.os').textContent = bytes>0 ? 'With '+bytes+' amber bytes aboard. The sea keeps honest ledgers.' : 'The sea keeps honest ledgers.';
+    $id('sail').textContent = '⛵ Sail again';
+    overlay.classList.remove('hide');
+    startIdle();
+  }
+
+  function drawBG(){
+    // dusk sky
+    const sky = ctx.createLinearGradient(0,0,0,SEA);
+    sky.addColorStop(0,'#080B11'); sky.addColorStop(0.72,'#0C1220'); sky.addColorStop(1,'#251B27');
+    ctx.fillStyle = sky; ctx.fillRect(0,0,W,SEA);
+    // star spies
+    for (const s of stars){
+      const tw = reduced ? 0.75 : 0.55 + 0.45*Math.sin(t*0.02*s.s + s.p);
+      ctx.fillStyle = 'rgba(229,185,107,'+(0.35*tw).toFixed(3)+')';
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y-s.r*2); ctx.lineTo(s.x+s.r*0.7, s.y); ctx.lineTo(s.x, s.y+s.r*2);
+      ctx.lineTo(s.x-s.r*0.7, s.y); ctx.closePath(); ctx.fill();
+    }
+    // pasha moon
+    const mx = W-190, my = 84, mr = 44;
+    ctx.save();
+    ctx.strokeStyle = '#E5B96B'; ctx.lineWidth = 7;
+    ctx.shadowColor = 'rgba(229,185,107,0.65)'; ctx.shadowBlur = 26;
+    ctx.beginPath(); ctx.arc(mx,my,mr,0,Math.PI*2); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.lineWidth = 2.4; ctx.strokeStyle = 'rgba(10,13,18,0.8)';
+    for (let a=0; a<Math.PI*2; a+=Math.PI/9){
+      ctx.beginPath();
+      ctx.moveTo(mx+Math.cos(a)*(mr-4), my+Math.sin(a)*(mr-4));
+      ctx.lineTo(mx+Math.cos(a+0.18)*(mr+4), my+Math.sin(a+0.18)*(mr+4));
+      ctx.stroke();
+    }
+    // knot
+    ctx.fillStyle = '#E5B96B';
+    ctx.beginPath(); ctx.arc(mx, my+mr, 6.5, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+    // moon glade on water
+    ctx.fillStyle = 'rgba(229,185,107,0.08)';
+    ctx.fillRect(mx-30, SEA, 60, H-SEA);
+  }
+  function waveY(x){
+    return SEA + 4*Math.sin((x + t*speed)*0.018) + 2*Math.sin((x + t*speed)*0.043);
+  }
+  function drawSea(){
+    ctx.fillStyle = '#0D1524';
+    ctx.beginPath(); ctx.moveTo(0,H);
+    for (let x=0; x<=W; x+=8) ctx.lineTo(x, waveY(x));
+    ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(57,135,229,0.75)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let x=0; x<=W; x+=8){ const y=waveY(x); x===0?ctx.moveTo(x,y):ctx.lineTo(x,y); }
+    ctx.stroke();
+    // drifting data tiles in the water
+    for (const p of tiles){
+      let x = p.x - (t*speed*0.6) % (W+80);
+      if (x < -60) x += W+80;
+      const y = waveY(x) + p.d;
+      if (y > H-6) continue;
+      ctx.fillStyle = p.c < 0.12 ? 'rgba(229,185,107,0.5)' : p.c < 0.5 ? 'rgba(30,90,158,0.55)' : 'rgba(25,158,112,0.4)';
+      ctx.fillRect(x, y, p.w, 5);
+    }
+  }
+  function drawBoat(){
+    const bob = jumping ? 0 : 2.4*Math.sin(t*0.09);
+    const y = boatY + bob;
+    ctx.save();
+    ctx.translate(BOATX, y);
+    // hull
+    ctx.fillStyle = '#131A28';
+    ctx.strokeStyle = '#E5B96B'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-44, -8); ctx.quadraticCurveTo(-30, 12, 0, 13);
+    ctx.quadraticCurveTo(34, 12, 46, -10);
+    ctx.lineTo(38, -8); ctx.lineTo(-38, -8); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // makara prow
+    ctx.beginPath();
+    ctx.moveTo(46, -10);
+    ctx.quadraticCurveTo(58, -18, 54, -30);
+    ctx.quadraticCurveTo(50, -24, 44, -24);
+    ctx.closePath();
+    ctx.fillStyle = '#E5B96B'; ctx.fill();
+    // mast + lateen sail
+    ctx.strokeStyle = '#7A879E'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(-2, -8); ctx.lineTo(-2, -74); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-34, -18); ctx.lineTo(30, -80); ctx.stroke();
+    ctx.fillStyle = '#9AA5B8';
+    ctx.beginPath(); ctx.moveTo(-30, -20); ctx.lineTo(28, -76); ctx.lineTo(24, -22); ctx.closePath();
+    ctx.fill();
+    // lantern
+    const lg = ctx.createRadialGradient(40,-16,1, 40,-16,14);
+    lg.addColorStop(0,'rgba(229,185,107,0.9)'); lg.addColorStop(1,'rgba(229,185,107,0)');
+    ctx.fillStyle = lg; ctx.beginPath(); ctx.arc(40,-16,14,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#E5B96B'; ctx.fillRect(38,-19,5,7);
+    ctx.restore();
+  }
+  function drawReef(r){
+    const y = waveY(r.x);
+    ctx.fillStyle = '#e66767';
+    ctx.strokeStyle = '#8f3030'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(r.x, y+6);
+    ctx.lineTo(r.x + r.w*0.18, y - r.h*0.72);
+    ctx.lineTo(r.x + r.w*0.44, y - r.h*0.42);
+    ctx.lineTo(r.x + r.w*0.62, y - r.h);
+    ctx.lineTo(r.x + r.w*0.86, y - r.h*0.5);
+    ctx.lineTo(r.x + r.w, y+6);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  function drawOrb(o){
+    const y = o.y + 3*Math.sin(t*0.07 + o.x*0.05);
+    ctx.save();
+    ctx.translate(o.x, y); ctx.rotate(Math.PI/4);
+    ctx.fillStyle = '#E5B96B';
+    ctx.shadowColor = 'rgba(229,185,107,0.8)'; ctx.shadowBlur = 10;
+    ctx.fillRect(-7,-7,14,14);
+    ctx.restore();
+    o.dy = y;
+  }
+
+  function loop(ts){
+    if (!running) return;
+    // delta-time: normalise to 60fps units so the boat runs at the same
+    // real-world speed on 60, 120 or 144 Hz screens. Clamp big gaps
+    // (tab was backgrounded) so nothing teleports on the first frame back.
+    if (!lastTs) lastTs = ts;
+    let dt = (ts - lastTs) / 16.667;
+    lastTs = ts;
+    if (!(dt > 0)) dt = 1;
+    dt = Math.min(dt, 2.5);
+
+    t += dt;
+    dist += speed*0.28*dt;
+    // dino-style: constant acceleration every frame up to MAX_SPEED
+    speed = Math.min(MAX_SPEED, speed + ACCEL*dt);
+
+    // physics (dino gravity + variable jump height + 3× dive)
+    if (jumping){
+      vy += GRAV*dt;
+      boatY += vy*dt*(speedDrop ? 3 : 1);
+      if (SEA - boatY >= MINJUMP) reachedMin = true;
+      if (boatY >= SEA){ boatY = SEA; jumping = false; vy = 0; speedDrop = false; }
+    }
+    const step = speed*dt;
+    // spawn — dino getGap: minGap = width×speed + typeMinGap×gapCoefficient,
+    // maxGap = 1.5×minGap, so gaps stretch as the world speeds up
+    nextReef -= step;
+    if (nextReef <= 0){
+      const w = 22 + rnd()*18, h = 28 + rnd()*24;
+      reefs.push({x: W+40, w, h});
+      const minGap = w*speed + 430;   // gaps stretch with speed — never unfair
+      nextReef = minGap*(1 + rnd()*0.5);
+    }
+    nextOrb -= step;
+    if (nextOrb <= 0){
+      orbs.push({x: W+40, y: SEA-98 - rnd()*36, dy: 0});
+      nextOrb = 520 + rnd()*940;
+    }
+    reefs.forEach(r => r.x -= step);
+    orbs.forEach(o => o.x -= step);
+    reefs = reefs.filter(r => r.x > -80);
+    orbs = orbs.filter(o => o.x > -40);
+
+    // draw
+    ctx.clearRect(0,0,W,H);
+    drawBG(); drawSea();
+    reefs.forEach(drawReef);
+    orbs.forEach(drawOrb);
+    drawBoat();
+
+    // collisions (boat box)
+    const bx1 = BOATX-28, bx2 = BOATX+34, by2 = boatY+6, by1 = boatY-30;
+    for (const r of reefs){
+      const ry = waveY(r.x);
+      if (bx2 > r.x+3 && bx1 < r.x+r.w-3 && by2 > ry-r.h+6){ wreck(); break; }
+    }
+    for (const o of orbs){
+      if (o.x > bx1 && o.x < bx2 && o.dy > by1-10 && o.dy < by2+6 && !o.got){
+        o.got = true; o.x = -999; bytes += 8;
+        $id('g-bytes').textContent = bytes;
+      }
+    }
+    $id('g-dist').textContent = fath();
+    if (running) requestAnimationFrame(loop);
+  }
+
+  // input
+  $id('sail').addEventListener('click', start);
+  const gameVisible = () => box.getBoundingClientRect().top < innerHeight && box.getBoundingClientRect().bottom > 0;
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.code === 'ArrowUp'){
+      if (!gameVisible()) return;
+      e.preventDefault();
+      if (!running){ start(); } else jump();
+    }
+    if (e.code === 'ArrowDown' && running && !over){
+      e.preventDefault(); dive();
+    }
+  });
+  window.addEventListener('keyup', e => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') endJump();
+    if (e.code === 'ArrowDown') speedDrop = false;
+  });
+  cv.addEventListener('pointerdown', () => { if (!running){ start(); } else jump(); });
+  cv.addEventListener('pointerup', endJump);
+  // pause when hidden
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && running && !over){
+      running = false;
+      overlay.querySelector('.ot').textContent = 'At anchor';
+      overlay.querySelector('.os').textContent = 'The watch paused while you were away.';
+      $id('sail').textContent = '⛵ Resume — sail on';
+      overlay.classList.remove('hide');
+    }
+  });
+  // ambient preview: the sea is already sailing behind the overlay
+  let idleT = 40, idleActive = false, inView = true;
+  function idleLoop(){
+    if (running || !inView){ idleActive = false; return; }
+    idleT += 0.5; t = idleT;
+    drawBG(); drawSea(); drawBoat();
+    requestAnimationFrame(idleLoop);
+  }
+  function startIdle(){
+    if (reduced){ t = 40; drawBG(); drawSea(); drawBoat(); return; }
+    if (!idleActive){ idleActive = true; requestAnimationFrame(idleLoop); }
+  }
+  new IntersectionObserver(es => {
+    inView = es[0].isIntersecting;
+    if (inView && !running) startIdle();
+  }, {threshold: .05}).observe(box);
+  startIdle();
+
+  // headless test hook
+  if (new URLSearchParams(location.search).get('autoplay')){
+    start();
+    setInterval(jump, 1150);
+  }
+})();
+</script>
+</body>
+</html>
