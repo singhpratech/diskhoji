@@ -1,0 +1,215 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and upload assets for (e.g. v0.2.7)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # Guarantee ONE published, "latest" release exists before any asset is uploaded.
+  # Why: CI only uploads assets, it never sets release state — and GitHub reverts a
+  # release to DRAFT whenever its tag is deleted+re-pushed (our single-commit amend
+  # flow does exactly that). A drafted release drops out of /releases/latest, so the
+  # site's auto-detect silently serves the previous version. This job self-heals it.
+  release-init:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: ensure published + latest release
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --draft=false --latest
+          else
+            gh release create "$TAG" --title "Diskhoji $TAG" --generate-notes --latest
+          fi
+
+  build:
+    needs: release-init
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            asset: linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libgl1-mesa-dev
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
+      - name: package & upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          DIR="diskhoji-$TAG-${{ matrix.asset }}"
+          mkdir "$DIR"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/diskhoji.exe" README.md LICENSE "$DIR/"
+            7z a "$DIR.zip" "$DIR" >/dev/null
+            gh release upload "$TAG" "$DIR.zip" --clobber
+            # also ship the raw binary so users can copy-and-run without unzipping
+            cp "target/${{ matrix.target }}/release/diskhoji.exe" "diskhoji-$TAG-windows-x86_64.exe"
+            gh release upload "$TAG" "diskhoji-$TAG-windows-x86_64.exe" --clobber
+          else
+            cp "target/${{ matrix.target }}/release/diskhoji" README.md LICENSE "$DIR/"
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              codesign --force --sign - "$DIR/diskhoji"   # ad-hoc: avoids "damaged"
+            fi
+            if [ "${{ runner.os }}" = "Linux" ]; then
+              # ship the icons so install.sh can create a hicolor menu entry
+              cp assets/icon-256.png assets/icon-64.png "$DIR/"
+            fi
+            tar czf "$DIR.tar.gz" "$DIR"
+            gh release upload "$TAG" "$DIR.tar.gz" --clobber
+          fi
+      - name: macOS app bundle (double-click)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          APP="Diskhoji.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp "target/${{ matrix.target }}/release/diskhoji" "$APP/Contents/MacOS/diskhoji"
+          # Canonical, Retina-complete .iconset from the 512px master.
+          # (assets/icon-256.png is too small; icon_64x64 is not a valid name.)
+          mkdir icon.iconset
+          gen() { sips -z "$1" "$1" docs/icon.png --out "icon.iconset/icon_$2.png" >/dev/null; }
+          gen 16   16x16
+          gen 32   16x16@2x
+          gen 32   32x32
+          gen 64   32x32@2x
+          gen 128  128x128
+          gen 256  128x128@2x
+          gen 256  256x256
+          gen 512  256x256@2x
+          gen 512  512x512
+          iconutil -c icns icon.iconset -o "$APP/Contents/Resources/icon.icns"
+          VER="${TAG#v}"
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Diskhoji</string>
+            <key>CFBundleDisplayName</key><string>Diskhoji</string>
+            <key>CFBundleIdentifier</key><string>org.diskhoji.app</string>
+            <key>CFBundleExecutable</key><string>diskhoji</string>
+            <key>CFBundleIconFile</key><string>icon</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>CFBundleShortVersionString</key><string>${VER}</string>
+            <key>CFBundleVersion</key><string>${VER}</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          # Ad-hoc sign so Apple Silicon doesn't reject it as "damaged".
+          # (Not notarized — users still un-quarantine once; see the site.)
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP" && echo "ad-hoc signature OK"
+          ZIP="Diskhoji-$TAG-${{ matrix.asset }}.app.zip"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          gh release upload "$TAG" "$ZIP" --clobber
+          # Build a drag-to-Applications .dmg (the familiar macOS installer window)
+          STAGE=dmg-stage
+          mkdir "$STAGE"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          DMG="Diskhoji-$TAG-${{ matrix.asset }}.dmg"
+          hdiutil create -volname "Diskhoji" -srcfolder "$STAGE" \
+            -ov -format UDZO "$DMG"
+          gh release upload "$TAG" "$DMG" --clobber
+
+      - name: linux AppImage (double-click)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          curl -fsSLo appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          mkdir -p AppDir/usr/bin \
+                   AppDir/usr/share/applications \
+                   AppDir/usr/share/icons/hicolor/256x256/apps \
+                   AppDir/usr/share/icons/hicolor/64x64/apps
+          cp "target/${{ matrix.target }}/release/diskhoji" AppDir/usr/bin/
+          cp assets/icon-256.png AppDir/usr/share/icons/hicolor/256x256/apps/diskhoji.png
+          cp assets/icon-64.png  AppDir/usr/share/icons/hicolor/64x64/apps/diskhoji.png
+          # appimagetool needs the icon + .desktop at the AppDir root as well.
+          # printf (not a heredoc) so no YAML indentation leaks into the file.
+          cp assets/icon-256.png AppDir/diskhoji.png
+          printf '%s\n' \
+            '[Desktop Entry]' \
+            'Type=Application' \
+            'Version=1.0' \
+            'Name=Diskhoji' \
+            'GenericName=Disk Usage Analyzer' \
+            'Comment=Every byte, accounted for' \
+            'Exec=diskhoji' \
+            'Icon=diskhoji' \
+            'Terminal=false' \
+            'Categories=System;Utility;Filesystem;' \
+            'Keywords=disk;storage;usage;treemap;heatmap;cleanup;' \
+            'StartupWMClass=diskhoji' > AppDir/diskhoji.desktop
+          cp AppDir/diskhoji.desktop AppDir/usr/share/applications/diskhoji.desktop
+          printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\nexec "$HERE/usr/bin/diskhoji" "$@"\n' > AppDir/AppRun
+          chmod +x AppDir/AppRun
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir \
+            "Diskhoji-$TAG-linux-x86_64.AppImage"
+          gh release upload "$TAG" "Diskhoji-$TAG-linux-x86_64.AppImage" --clobber
+
+      - name: windows MSI installer
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $TAG = "${{ github.event.inputs.tag || github.ref_name }}"
+          $VER = $TAG -replace '^v',''
+          cargo install cargo-wix --locked
+          # Use the COMMITTED wix/main.wxs (Start Menu + Desktop shortcuts + icon).
+          # Do NOT run `cargo wix init` — it would overwrite our installer with the
+          # stock template that ships no shortcut. `cargo wix` auto-discovers it.
+          # reuse the already-built target binary; name the output per-tag
+          cargo wix --no-build --nocapture `
+            --target x86_64-pc-windows-msvc `
+            --install-version $VER `
+            --output "diskhoji-$TAG-windows-x86_64.msi"
+          if (Test-Path "diskhoji-$TAG-windows-x86_64.msi") {
+            gh release upload "$TAG" "diskhoji-$TAG-windows-x86_64.msi" --clobber
+            Write-Host "MSI uploaded"
+          } else {
+            Write-Host "MSI build produced no file; zip remains the Windows path"
+          }
