@@ -1,0 +1,156 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  Diskhoji — WiX v3 installer definition (compiled by cargo-wix + WiX 3.11).
+
+  This file is committed on purpose. It REPLACES the stock template that the
+  `cargo wix init` step used to regenerate on every CI run. That stock template
+  only installed bin\diskhoji.exe plus a PATH entry and created no Start Menu
+  shortcut and no icon, so a user who ran the .msi had nothing to click. This
+  definition adds a Start Menu shortcut, a Desktop shortcut, and the app icon,
+  and keeps the PATH entry. CI must no longer run the `cargo wix init` step
+  (the force variant) or it will clobber this file.
+-->
+<?if $(sys.BUILDARCH) = x64 or $(sys.BUILDARCH) = arm64 ?>
+    <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
+<?else ?>
+    <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
+<?endif ?>
+
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+
+    <Product
+        Id='*'
+        Name='Diskhoji'
+        UpgradeCode='1D2167E7-E17E-4AEF-BB8C-C133CE0FEC06'
+        Manufacturer='Prateek Singh'
+        Language='1033'
+        Codepage='1252'
+        Version='$(var.Version)'>
+
+        <Package Id='*'
+            Keywords='Installer'
+            Description='Diskhoji — fast disk space analyzer'
+            Manufacturer='Prateek Singh'
+            InstallerVersion='450'
+            Languages='1033'
+            Compressed='yes'
+            InstallScope='perMachine'
+            SummaryCodepage='1252'/>
+
+        <MajorUpgrade
+            Schedule='afterInstallInitialize'
+            DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
+
+        <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
+        <Property Id='DiskPrompt' Value='Diskhoji Installation'/>
+
+        <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
+                <Directory Id='APPLICATIONFOLDER' Name='Diskhoji'>
+                    <Directory Id='Bin' Name='bin'>
+                        <Component Id='Path' Guid='4BB4EEF0-FDC1-40CB-B0FD-FCF5B786A96F' KeyPath='yes'>
+                            <Environment
+                                Id='PATH'
+                                Name='PATH'
+                                Value='[Bin]'
+                                Permanent='no'
+                                Part='last'
+                                Action='set'
+                                System='yes'/>
+                        </Component>
+                        <Component Id='binary0' Guid='*'>
+                            <File
+                                Id='exe0'
+                                Name='diskhoji.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\diskhoji.exe'
+                                KeyPath='yes'/>
+                        </Component>
+                    </Directory>
+                </Directory>
+            </Directory>
+
+            <!-- Start Menu\Programs\Diskhoji -->
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='ApplicationProgramsFolder' Name='Diskhoji'/>
+            </Directory>
+
+            <!-- Desktop -->
+            <Directory Id='DesktopFolder' Name='Desktop'/>
+        </Directory>
+
+        <!-- Start Menu shortcut. A non-advertised shortcut needs its own
+             component with an HKCU RegistryValue KeyPath (WiX/ICE43 rule). -->
+        <DirectoryRef Id='ApplicationProgramsFolder'>
+            <Component Id='StartMenuShortcut' Guid='*'>
+                <Shortcut Id='StartMenuDiskhoji'
+                    Name='Diskhoji'
+                    Description='Diskhoji — every byte, accounted for'
+                    Target='[#exe0]'
+                    WorkingDirectory='Bin'
+                    Icon='ProductICO'/>
+                <RemoveFolder Id='CleanupProgramsFolder'
+                    Directory='ApplicationProgramsFolder'
+                    On='uninstall'/>
+                <RegistryValue Root='HKCU'
+                    Key='Software\Diskhoji'
+                    Name='startmenu'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes'/>
+            </Component>
+        </DirectoryRef>
+
+        <!-- Desktop shortcut (also non-advertised; its own HKCU KeyPath). -->
+        <DirectoryRef Id='DesktopFolder'>
+            <Component Id='DesktopShortcut' Guid='*'>
+                <Shortcut Id='DesktopDiskhoji'
+                    Name='Diskhoji'
+                    Description='Diskhoji — every byte, accounted for'
+                    Target='[#exe0]'
+                    WorkingDirectory='Bin'
+                    Icon='ProductICO'/>
+                <RegistryValue Root='HKCU'
+                    Key='Software\Diskhoji'
+                    Name='desktop'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes'/>
+            </Component>
+        </DirectoryRef>
+
+        <!-- App icon: used by the shortcuts and by Add/Remove Programs. -->
+        <Icon Id='ProductICO' SourceFile='assets\icon.ico'/>
+        <Property Id='ARPPRODUCTICON' Value='ProductICO'/>
+        <Property Id='ARPHELPLINK' Value='https://diskhoji.org'/>
+        <Property Id='ARPURLINFOABOUT' Value='https://diskhoji.org'/>
+
+        <Feature Id='Binaries'
+            Title='Diskhoji'
+            Description='Installs the Diskhoji application and shortcuts.'
+            Level='1'
+            ConfigurableDirectory='APPLICATIONFOLDER'
+            Absent='disallow'>
+            <ComponentRef Id='binary0'/>
+            <ComponentRef Id='StartMenuShortcut'/>
+            <ComponentRef Id='DesktopShortcut'/>
+
+            <Feature Id='Environment'
+                Title='PATH Environment Variable'
+                Description='Add the install location to PATH so `diskhoji` runs from any shell.'
+                Level='1'>
+                <ComponentRef Id='Path'/>
+            </Feature>
+        </Feature>
+
+        <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+
+        <!-- WixUI_FeatureTree: a real wizard (Welcome -> features -> install ->
+             finish) with NO license page, so no License.rtf has to be committed.
+             WixUIExtension is linked by cargo-wix by default. -->
+        <Property Id='WIXUI_INSTALLDIR' Value='APPLICATIONFOLDER'/>
+        <UIRef Id='WixUI_FeatureTree'/>
+        <UIRef Id='WixUI_ErrorProgressText'/>
+
+    </Product>
+</Wix>
